@@ -15,7 +15,7 @@ Status: scaffold only. Nothing is implemented yet.
 | --- | --- |
 | kubebuilder | v4.16.0 (layout `go.kubebuilder.io/v4`) |
 | controller-gen | v0.22.0 |
-| Go | 1.26.0 (`go.mod`) |
+| Go | 1.26.11 (`go.mod`; raised from 1.26.0 to clear stdlib advisories) |
 
 ## License
 

@@ -9,6 +9,8 @@ import (
 const (
 	// ConditionReady mirrors the Pod's Ready condition.
 	ConditionReady = "Ready"
+	// ConditionTTLClamped is true when spec.ttl exceeds the operator max TTL.
+	ConditionTTLClamped = "TTLClamped"
 
 	// ReasonNameConflict marks a CR whose name is taken by a Pod it does not own.
 	ReasonNameConflict = "NameConflict"
@@ -84,4 +86,14 @@ func conflictCondition() metav1.Condition {
 		Reason:  ReasonNameConflict,
 		Message: "a Pod with this name exists and is not owned by this OnDemandPod",
 	}
+}
+
+func clampedCondition(clamped bool) metav1.Condition {
+	if clamped {
+		return metav1.Condition{
+			Type: ConditionTTLClamped, Status: metav1.ConditionTrue, Reason: "ExceedsMaxTTL",
+			Message: "spec.ttl exceeds the operator max TTL; the lease ends at the max TTL instead",
+		}
+	}
+	return metav1.Condition{Type: ConditionTTLClamped, Status: metav1.ConditionFalse, Reason: "WithinMaxTTL"}
 }

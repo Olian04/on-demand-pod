@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -22,7 +23,17 @@ import (
 	"github.com/Olian04/on-demand-pod/internal/testenv"
 )
 
-var k8s client.Client
+const (
+	phasePending = "Pending"
+	testImage    = "busybox:1"
+)
+
+var (
+	k8s        client.Client
+	reconciler *controller.OnDemandPodReconciler
+	fakeClock  = clocktesting.NewFakeClock(time.Now())
+	testConfig = controller.Config{DefaultTTL: 2 * time.Hour, MaxTTL: 8 * time.Hour}
+)
 
 func TestMain(m *testing.M) {
 	env, cfg, err := testenv.Start()
@@ -50,7 +61,12 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	if err := (&controller.OnDemandPodReconciler{Client: mgr.GetClient(), Scheme: scheme}).SetupWithManager(mgr); err != nil {
+	reconciler, err = controller.NewOnDemandPodReconciler(mgr.GetClient(), scheme, testConfig, controller.WithClock(fakeClock))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
+	if err := reconciler.SetupWithManager(mgr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
@@ -69,9 +85,12 @@ var seq atomic.Int64
 
 func newCR(t *testing.T, mutate func(*v1alpha1.OnDemandPod)) *v1alpha1.OnDemandPod {
 	t.Helper()
+	// Tests run one at a time and some move the clock far ahead; resetting here
+	// keeps a later test's fresh CR from looking long expired.
+	fakeClock.SetTime(time.Now())
 	odp := &v1alpha1.OnDemandPod{
 		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("t-%d", seq.Add(1)), Namespace: "default"},
-		Spec:       v1alpha1.OnDemandPodSpec{Image: "busybox:1", Command: []string{"sleep"}, Args: []string{"1"}},
+		Spec:       v1alpha1.OnDemandPodSpec{Image: testImage, Command: []string{"sleep"}, Args: []string{"1"}},
 	}
 	if mutate != nil {
 		mutate(odp)
@@ -157,7 +176,7 @@ func TestCreatesHardenedOwnedPod(t *testing.T) {
 	if c.SecurityContext == nil || c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) != 1 || c.SecurityContext.Capabilities.Drop[0] != "ALL" {
 		t.Error("capabilities are not dropped")
 	}
-	if c.Image != "busybox:1" || len(c.Command) != 1 || len(c.Args) != 1 || len(c.Env) != 1 {
+	if c.Image != testImage || len(c.Command) != 1 || len(c.Args) != 1 || len(c.Env) != 1 {
 		t.Errorf("container did not carry the spec: %+v", c)
 	}
 }
@@ -170,7 +189,7 @@ func TestMirrorsPodPhaseAndReadiness(t *testing.T) {
 	}
 	pod := awaitPod(t, odp)
 
-	pending := awaitStatus(t, odp, "Pending status", func(o *v1alpha1.OnDemandPod) bool { return o.Status.Phase == "Pending" })
+	pending := awaitStatus(t, odp, "Pending status", func(o *v1alpha1.OnDemandPod) bool { return o.Status.Phase == phasePending })
 	if pending.Status.ObservedGeneration != pending.Generation {
 		t.Errorf("observedGeneration = %d, want %d", pending.Status.ObservedGeneration, pending.Generation)
 	}
@@ -222,7 +241,7 @@ func TestSurfacesWaitingReasonOnReadyCondition(t *testing.T) {
 				c := meta.FindStatusCondition(o.Status.Conditions, "Ready")
 				return c != nil && c.Reason == reason
 			})
-			if cur.Status.Phase != "Pending" {
+			if cur.Status.Phase != phasePending {
 				t.Errorf("phase = %q, want Pending", cur.Status.Phase)
 			}
 		})

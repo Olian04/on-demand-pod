@@ -18,12 +18,9 @@ rules:
   resources:
   - ondemandpods
   verbs:
-  - create
   - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - ondemand.olian04.github.io
