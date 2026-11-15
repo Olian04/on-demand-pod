@@ -31,3 +31,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Build output and locally installed tools (make controller-gen etc.)
+bin/

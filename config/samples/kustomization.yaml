@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- ondemand_v1alpha1_ondemandpod.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

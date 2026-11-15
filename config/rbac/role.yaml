@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ondemand.olian04.github.io
+  resources:
+  - ondemandpods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ondemand.olian04.github.io
+  resources:
+  - ondemandpods/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ondemand.olian04.github.io
+  resources:
+  - ondemandpods/status
+  verbs:
+  - get
+  - patch
+  - update
