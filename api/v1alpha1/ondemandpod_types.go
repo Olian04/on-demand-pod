@@ -22,6 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// ContainerName is the name of the single container in every Pod the operator
+// creates. Clients such as the kubectl plugin rely on it to exec.
+const ContainerName = "main"
+
 // OnDemandPodSpec describes the pod to run and how long it may live.
 //
 // Immutability is enforced here, on the object, and not on each field. CEL

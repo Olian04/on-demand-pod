@@ -109,8 +109,9 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
+build: manifests generate fmt vet ## Build the operator and the kubectl plugin.
 	go build -o bin/manager ./cmd/operator
+	go build -o bin/kubectl-ondemand ./cmd/kubectl-ondemand
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

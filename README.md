@@ -29,6 +29,21 @@ Extend a lease by raising `ttl`. The lease is capped at the operator's
 kubectl get odp        # image, phase, ready, expiry
 ```
 
+## kubectl plugin
+
+`make build` produces `bin/kubectl-ondemand`; put it on your `PATH` and kubectl
+finds it as `kubectl ondemand`. It is a thin client: every command is one plain
+operation on the CR, and applying YAML by hand behaves identically.
+
+| Command | Equivalent |
+| --- | --- |
+| `kubectl ondemand run <image> [--ttl 2h] [--name N] [-it] [-- cmd args...]` | create the CR, wait for Ready, optionally exec `sh` |
+| `kubectl ondemand ls` | `kubectl get odp`, plus time remaining |
+| `kubectl ondemand extend <name> <duration>` | patch `spec.ttl` to the new total lease length |
+| `kubectl ondemand rm <name>` | `kubectl delete odp <name>` |
+
+`--namespace` and `--context` behave as in kubectl.
+
 ## Deploy
 
 ```bash

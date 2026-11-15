@@ -16,8 +16,6 @@ const (
 	ManagedByValue = "on-demand-pod"
 	// OnDemandPodLabel points from a Pod back at the CR that owns it.
 	OnDemandPodLabel = "ondemand.olian04.github.io/name"
-
-	containerName = "main"
 )
 
 // newPod builds the Pod for a CR. deadline is the kubelet-enforced hard
@@ -52,7 +50,7 @@ func newPod(odp *v1alpha1.OnDemandPod, deadline time.Duration) *corev1.Pod {
 				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 			},
 			Containers: []corev1.Container{{
-				Name:      containerName,
+				Name:      v1alpha1.ContainerName,
 				Image:     odp.Spec.Image,
 				Command:   odp.Spec.Command,
 				Args:      odp.Spec.Args,
