@@ -17,71 +17,83 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// OnDemandPodSpec defines the desired state of OnDemandPod
+// OnDemandPodSpec describes the pod to run and how long it may live.
+//
+// Immutability is enforced here, on the object, and not on each field. CEL
+// transition rules on a field only run when the field exists in both the old
+// and new object, so a field-level rule would let a user add or remove an
+// optional field after creation. Checking presence and value together at this
+// level closes that gap. The cost is that every rule is evaluated on every update.
+// +kubebuilder:validation:XValidation:rule="self.image == oldSelf.image",message="image is immutable",fieldPath=".image"
+// +kubebuilder:validation:XValidation:rule="has(self.command) ? (has(oldSelf.command) && self.command == oldSelf.command) : !has(oldSelf.command)",message="command is immutable",fieldPath=".command"
+// +kubebuilder:validation:XValidation:rule="has(self.args) ? (has(oldSelf.args) && self.args == oldSelf.args) : !has(oldSelf.args)",message="args is immutable",fieldPath=".args"
+// +kubebuilder:validation:XValidation:rule="has(self.env) ? (has(oldSelf.env) && self.env == oldSelf.env) : !has(oldSelf.env)",message="env is immutable",fieldPath=".env"
+// +kubebuilder:validation:XValidation:rule="has(self.resources) ? (has(oldSelf.resources) && self.resources == oldSelf.resources) : !has(oldSelf.resources)",message="resources is immutable",fieldPath=".resources"
 type OnDemandPodSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
 
-	// foo is an example field of OnDemandPod. Edit ondemandpod_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Command []string `json:"command,omitempty"`
+
+	Args []string `json:"args,omitempty"`
+
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// TTL is the total lease length measured from creation. It is the only
+	// mutable field. Extending a lease means increasing this value. When
+	// empty, the operator's default TTL applies.
+	TTL *metav1.Duration `json:"ttl,omitempty"`
 }
 
-// OnDemandPodStatus defines the observed state of OnDemandPod.
+// OnDemandPodStatus is the observed state of an OnDemandPod.
 type OnDemandPodStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed
+	Phase string `json:"phase,omitempty"`
 
-	// conditions represent the current state of the OnDemandPod resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// ExpiresAt is creationTimestamp + min(spec.ttl, operator max TTL).
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
+
+	// Conditions: Ready mirrors Pod Ready. TTLClamped is true when
+	// spec.ttl exceeds the operator max TTL.
 	// +listType=map
 	// +listMapKey=type
-	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=odp
+// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.expiresAt`
 
-// OnDemandPod is the Schema for the ondemandpods API
+// OnDemandPod is a pod with a lease: the operator runs it and deletes it at expiry.
 type OnDemandPod struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of OnDemandPod
 	// +required
 	Spec OnDemandPodSpec `json:"spec"`
 
-	// status defines the observed state of OnDemandPod
 	// +optional
 	Status OnDemandPodStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// OnDemandPodList contains a list of OnDemandPod
+// OnDemandPodList contains a list of OnDemandPod.
 type OnDemandPodList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
