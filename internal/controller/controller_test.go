@@ -23,6 +23,13 @@ import (
 	"github.com/Olian04/on-demand-pod/internal/testenv"
 )
 
+// countingRecorder counts expiries reported by the reconciler.
+type countingRecorder struct{ n atomic.Int64 }
+
+func (c *countingRecorder) PodExpired() { c.n.Add(1) }
+
+var expiries = &countingRecorder{}
+
 const (
 	phasePending = "Pending"
 	testImage    = "busybox:1"
@@ -61,7 +68,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	reconciler, err = controller.NewOnDemandPodReconciler(mgr.GetClient(), scheme, testConfig, controller.WithClock(fakeClock))
+	reconciler, err = controller.NewOnDemandPodReconciler(mgr.GetClient(), scheme, testConfig, controller.WithClock(fakeClock), controller.WithExpiryRecorder(expiries))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return

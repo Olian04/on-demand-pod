@@ -132,8 +132,12 @@ func TestDeletesCRAtExpiry(t *testing.T) {
 	awaitPod(t, odp)
 
 	fakeClock.SetTime(odp.Status.ExpiresAt.Time)
+	before := expiries.n.Load()
 	poke(t, odp)
 	eventually(t, "CR deletion", func() bool { return !exists(odp) })
+	if got := expiries.n.Load() - before; got != 1 {
+		t.Errorf("expiry recorded %d times, want 1", got)
+	}
 }
 
 func TestPodCarriesMaxTTLDeadlineBackstop(t *testing.T) {

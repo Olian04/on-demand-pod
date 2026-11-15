@@ -1,9 +1,8 @@
 apiVersion: ondemand.olian04.github.io/v1alpha1
 kind: OnDemandPod
 metadata:
-  labels:
-    app.kubernetes.io/name: on-demand-pod
-    app.kubernetes.io/managed-by: kustomize
   name: ondemandpod-sample
 spec:
-  # TODO(user): Add fields here
+  image: busybox:1.37
+  command: ["sleep", "infinity"]
+  ttl: 30m

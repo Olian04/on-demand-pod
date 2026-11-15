@@ -29,6 +29,22 @@ type OnDemandPodReconciler struct {
 	scheme *runtime.Scheme
 	cfg    Config
 	clock  clock.PassiveClock
+	rec    ExpiryRecorder
+}
+
+// ExpiryRecorder is told when a lease expires. It is an interface so the
+// controller does not depend on a metrics implementation.
+type ExpiryRecorder interface {
+	PodExpired()
+}
+
+type noRecorder struct{}
+
+func (noRecorder) PodExpired() {}
+
+// WithExpiryRecorder reports each expiry to rec.
+func WithExpiryRecorder(rec ExpiryRecorder) Option {
+	return func(r *OnDemandPodReconciler) { r.rec = rec }
 }
 
 // Option customizes an OnDemandPodReconciler.
@@ -46,7 +62,7 @@ func NewOnDemandPodReconciler(c client.Client, scheme *runtime.Scheme, cfg Confi
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	r := &OnDemandPodReconciler{Client: c, scheme: scheme, cfg: cfg, clock: clock.RealClock{}}
+	r := &OnDemandPodReconciler{Client: c, scheme: scheme, cfg: cfg, clock: clock.RealClock{}, rec: noRecorder{}}
 	for _, o := range opts {
 		o(r)
 	}
@@ -71,6 +87,9 @@ func (r *OnDemandPodReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if !now.Before(l.expiresAt) {
 		// Status is not written first: the object is about to disappear.
 		err := r.Delete(ctx, &odp, client.PropagationPolicy(metav1.DeletePropagationBackground))
+		if err == nil {
+			r.rec.PodExpired()
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 

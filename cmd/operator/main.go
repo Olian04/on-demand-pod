@@ -32,11 +32,13 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	ondemandv1alpha1 "github.com/Olian04/on-demand-pod/api/v1alpha1"
 	"github.com/Olian04/on-demand-pod/internal/controller"
+	"github.com/Olian04/on-demand-pod/internal/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -62,8 +64,8 @@ func main() {
 		enableHTTP2          bool
 		cfg                  controller.Config
 	)
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
-		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "The address the metrics endpoint binds to. "+
+		"Metrics are on by default; use :8080 with --metrics-secure=false for plain HTTP, or 0 to disable.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -127,7 +129,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	reconciler, err := controller.NewOnDemandPodReconciler(mgr.GetClient(), scheme, cfg)
+	m, err := metrics.New(ctrlmetrics.Registry, mgr.GetClient())
+	if err != nil {
+		setupLog.Error(err, "Failed to register metrics")
+		os.Exit(1)
+	}
+	reconciler, err := controller.NewOnDemandPodReconciler(mgr.GetClient(), scheme, cfg, controller.WithExpiryRecorder(m))
 	if err != nil {
 		setupLog.Error(err, "Failed to create reconciler")
 		os.Exit(1)

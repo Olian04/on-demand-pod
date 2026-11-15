@@ -17,6 +17,8 @@ import (
 	"github.com/Olian04/on-demand-pod/internal/testenv"
 )
 
+const testImage = "busybox:1"
+
 var k8s client.Client
 
 func TestMain(m *testing.M) {
@@ -44,7 +46,7 @@ var counter int
 func fullSpec() v1alpha1.OnDemandPodSpec {
 	ttl := metav1.Duration{Duration: time.Hour}
 	return v1alpha1.OnDemandPodSpec{
-		Image:   "busybox:1",
+		Image:   testImage,
 		Command: []string{"sh"},
 		Args:    []string{"-c", "sleep 1"},
 		Env:     []corev1.EnvVar{{Name: "A", Value: "1"}},
@@ -136,7 +138,7 @@ func TestImmutableFieldsRejectAddition(t *testing.T) {
 			continue
 		}
 		t.Run(f.name, func(t *testing.T) {
-			rejectsUpdate(t, v1alpha1.OnDemandPodSpec{Image: "busybox:1"}, f.add, "adding "+f.name)
+			rejectsUpdate(t, v1alpha1.OnDemandPodSpec{Image: testImage}, f.add, "adding "+f.name)
 		})
 	}
 }
