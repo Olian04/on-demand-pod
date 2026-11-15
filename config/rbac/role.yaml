@@ -5,6 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
   - ondemand.olian04.github.io
   resources:
   - ondemandpods
@@ -16,12 +25,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - ondemand.olian04.github.io
-  resources:
-  - ondemandpods/finalizers
-  verbs:
-  - update
 - apiGroups:
   - ondemand.olian04.github.io
   resources:
