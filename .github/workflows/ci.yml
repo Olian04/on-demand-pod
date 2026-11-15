@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned so a new release cannot change CI behavior unannounced.
+  GOVULNCHECK_VERSION: v1.9.0
+  KIND_VERSION: v0.33.0
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generated files are up to date
+        run: |
+          make manifests generate
+          git diff --exit-code -- api config/crd config/rbac
+
+      - run: go vet ./...
+      - run: go mod verify
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          govulncheck ./...
+      - name: golangci-lint
+        run: make lint
+      - name: Tests (race detector, shuffled, envtest)
+        run: make test
+
+  e2e:
+    name: End-to-end on kind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${KIND_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      # Creates the cluster, runs the suite (deploy, lease expiry, root-image
+      # failure, plugin commands) and tears the cluster down again.
+      - name: Run e2e
+        run: make test-e2e
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl get odp,pods -A -o wide || true
+          kubectl -n on-demand-pod-system logs deployment/on-demand-pod-controller-manager --tail=200 || true

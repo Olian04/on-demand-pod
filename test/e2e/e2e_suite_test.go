@@ -1,119 +1,124 @@
 //go:build e2e
-// +build e2e
 
-/*
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Package e2e runs the operator against a real cluster, normally kind. It
+// covers what envtest cannot: a kubelet, owner-reference garbage collection and
+// the container runtime's reaction to the hardened security context.
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1alpha1 "github.com/Olian04/on-demand-pod/api/v1alpha1"
 	"github.com/Olian04/on-demand-pod/test/utils"
 )
 
-var (
-	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/on-demand-pod:v0.0.1"
-	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
-	shouldCleanupCertManager = false
+const (
+	managerImage = "example.com/on-demand-pod:e2e"
+	operatorNS   = "on-demand-pod-system"
+	namespace    = "default"
+
+	// nonRootImage runs as a numeric non-root user, which the restricted
+	// security context requires. busybox runs as root and must not start.
+	nonRootImage = "registry.k8s.io/pause:3.10"
+	rootImage    = "busybox:1.37"
+
+	pollEvery = time.Second
 )
 
-// TestE2E runs the e2e test suite to validate the solution in an isolated environment.
-// The default setup requires Kind and CertManager.
-//
-// To enable kubectl kuberc (use custom kubectl configurations), set: KUBECTL_KUBERC=true
-// By default, kuberc is disabled to ensure consistent test behavior across different environments.
-// To skip CertManager installation, set: CERT_MANAGER_INSTALL_SKIP=true
-func TestE2E(t *testing.T) {
-	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting on-demand-pod e2e test suite\n")
-	RunSpecs(t, "e2e suite")
-}
+var k8s client.Client
 
-var _ = BeforeSuite(func() {
-	By("building the manager image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
-	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager image")
-
-	// TODO(user): If you want to change the e2e test vendor from Kind,
-	// ensure the image is built and available, then remove the following block.
-	By("loading the manager image on Kind")
-	err = utils.LoadImageToKindClusterWithName(managerImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
-
-	configureKubectlKubeRC()
-	setupCertManager()
-})
-
-var _ = AfterSuite(func() {
-	teardownCertManager()
-})
-
-// Disable kubectl kuberc by default for test isolation.
-// This prevents local kubectl configurations from affecting test behavior.
-// To enable kuberc, set: KUBECTL_KUBERC=true
-func configureKubectlKubeRC() {
-	if os.Getenv("KUBECTL_KUBERC") != "true" {
-		By("disabling kubectl kuberc for test isolation")
-		err := os.Setenv("KUBECTL_KUBERC", "false")
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to disable kubectl kuberc")
-		_, _ = fmt.Fprintf(GinkgoWriter,
-			"kubectl kuberc disabled for consistent test behavior (override with KUBECTL_KUBERC=true)\n")
-	} else {
-		_, _ = fmt.Fprintf(GinkgoWriter, "kubectl kuberc enabled (KUBECTL_KUBERC=true)\n")
-	}
-}
-
-// setupCertManager installs CertManager if needed for webhook tests.
-// Skips installation if CERT_MANAGER_INSTALL_SKIP=true or if already present.
-func setupCertManager() {
-	if os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true" {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager installation (CERT_MANAGER_INSTALL_SKIP=true)\n")
+func TestMain(m *testing.M) {
+	code := 1
+	defer func() { os.Exit(code) }()
+	if err := setup(); err != nil {
+		fmt.Fprintln(os.Stderr, "e2e setup:", err)
 		return
 	}
-
-	By("checking if CertManager is already installed")
-	if utils.IsCertManagerCRDsInstalled() {
-		_, _ = fmt.Fprintf(GinkgoWriter, "CertManager is already installed. Skipping installation.\n")
-		return
-	}
-
-	// Mark for cleanup before installation to handle interruptions and partial installs.
-	shouldCleanupCertManager = true
-
-	By("installing CertManager")
-	Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
+	code = m.Run()
+	teardown()
 }
 
-// teardownCertManager uninstalls CertManager if it was installed by setupCertManager.
-// This ensures we only remove what we installed.
-func teardownCertManager() {
-	if !shouldCleanupCertManager {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager cleanup (not installed by this suite)\n")
-		return
+// setup builds the operator image, loads it into kind, deploys it with the
+// shipped kustomize config and builds the plugin binary the tests drive.
+func setup() error {
+	if _, err := utils.Run(exec.Command("make", "docker-build", "IMG="+managerImage)); err != nil {
+		return err
 	}
+	if err := utils.LoadImageToKindClusterWithName(managerImage); err != nil {
+		return err
+	}
+	steps := [][]string{
+		{"make", "deploy", "IMG=" + managerImage},
+		{"kubectl", "rollout", "status", "deployment/on-demand-pod-controller-manager", "-n", operatorNS, "--timeout=120s"},
+		{"make", "build"},
+	}
+	for _, s := range steps {
+		if _, err := utils.Run(exec.Command(s[0], s[1:]...)); err != nil {
+			return err
+		}
+	}
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return err
+	}
+	if err := v1alpha1.AddToScheme(scheme.Scheme); err != nil {
+		return err
+	}
+	k8s, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	return err
+}
 
-	By("uninstalling CertManager")
-	utils.UninstallCertManager()
+func teardown() {
+	_, _ = utils.Run(exec.Command("make", "undeploy", "ignore-not-found=true"))
+}
+
+func eventually(t *testing.T, timeout time.Duration, what string, cond func() (bool, string)) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	last := ""
+	for time.Now().Before(deadline) {
+		ok, detail := cond()
+		if ok {
+			return
+		}
+		last = detail
+		time.Sleep(pollEvery)
+	}
+	t.Fatalf("timed out after %s waiting for %s; last state: %s", timeout, what, last)
+}
+
+func create(t *testing.T, name, image, ttl string) {
+	t.Helper()
+	d, err := time.ParseDuration(ttl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	odp := &v1alpha1.OnDemandPod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       v1alpha1.OnDemandPodSpec{Image: image, TTL: &metav1.Duration{Duration: d}},
+	}
+	if err := k8s.Create(context.Background(), odp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k8s.Delete(context.Background(), odp) })
+}
+
+func key(name string) types.NamespacedName {
+	return types.NamespacedName{Namespace: namespace, Name: name}
+}
+
+func isGone(obj client.Object, name string) bool {
+	return apierrors.IsNotFound(k8s.Get(context.Background(), key(name), obj))
 }
